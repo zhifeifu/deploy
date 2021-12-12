@@ -1,0 +1,150 @@
+# yaml 配置
+# 官方文档：https://docs.docker.com/compose/compose-file/
+version: "3.7"
+
+services:
+#  nginx:
+#    container_name: nginx
+#    image: nginx:1.17.10-alpine
+#    ports:
+#      - "80:80"
+#    depends_on:
+#      - app
+#    volumes:
+#      - ./nginx/deploy.conf:/etc/nginx/conf.d/deploy.conf
+#    command: nginx -g 'daemon off';
+
+  mysql:
+    # 镜像名
+    image: mysql:8.0.21
+    # 容器名(以后的控制都通过这个)
+    container_name: mysql
+    # 重启策略
+    restart: always
+    environment:
+      # 时区上海
+      TZ: Asia/Shanghai
+      # root 密码
+      MYSQL_ROOT_PASSWORD: 123456
+      # 初始化数据库(后续的初始化sql会在这个库执行)
+      MYSQL_DATABASE: deploy
+      # 初始化用户(不能是root 会报错, 后续需要给新用户赋予权限)
+      MYSQL_USER: deploy
+      # 用户密码
+      MYSQL_PASSWORD: 123456
+      # 映射端口
+    ports:
+      - "3306:3306"
+    volumes:
+      # 数据挂载
+      - ./mysql/data/:/var/lib/mysql/
+      # 配置挂载
+      - ./mysql/conf/:/etc/mysql/conf.d/
+      # 初始化目录挂载
+      - ./mysql/init/:/docker-entrypoint-initdb.d/
+    command:
+      # 将mysql8.0默认密码策略 修改为 原先 策略 (mysql8.0对其默认策略做了更改 会导致密码无法匹配)
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
+      --explicit_defaults_for_timestamp=true
+      --lower_case_table_names=1
+    networks:
+      - deploy
+
+  redis:
+    container_name: redis
+    image: redis:6.0.9-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - deploy
+    volumes:
+      - ./redis/data:/var/lib/redis
+
+  nsqlookupd:
+    image: nsqio/nsq
+    command: /nsqlookupd --http-address=0.0.0.0:4161
+    ports:
+      - "4160:4160"
+      - "4161:4161"
+    networks:
+      - deploy
+
+  nsqd:
+    image: nsqio/nsq
+    command: /nsqd --lookupd-tcp-address=nsqlookupd:4160
+    depends_on:
+      - nsqlookupd
+    ports:
+      - "4150:4150"
+      - "4151:4151"
+    networks:
+      - deploy
+
+  nsqadmin:
+    image: nsqio/nsq
+    command: /nsqadmin --lookupd-http-address=nsqlookupd:4161
+    depends_on:
+      - nsqlookupd
+    ports:
+      - "4171:4171"
+    networks:
+      - deploy
+
+  jaeger:
+    container_name: jaeger
+    image: jaegertracing/all-in-one:1.21
+    environment:
+      - COLLECTOR_ZIPKIN_HTTP_PORT=9411
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+    networks:
+      - deploy
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - deploy
+
+  etcd:
+    image: soyking/etcd-goreman:3.2.7
+    environment:
+      - CLIENT_ADDR=etcd
+    ports:
+      - "2379:2379"
+    networks:
+      - deploy
+
+  e3w:
+    image: soyking/e3w:latest
+    volumes:
+      - .etcd/conf/config.default.ini:/app/conf/config.default.ini
+    ports:
+      - "23790:8080"
+    depends_on:
+      - etcd
+    networks:
+      - deploy
+
+
+
+networks:
+  deploy:
+    driver: "bridge"
+
+volumes:
+  mysql_data:
+  redis_data:
