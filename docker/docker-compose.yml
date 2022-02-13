@@ -2,39 +2,50 @@
 # 官方文档：https://docs.docker.com/compose/compose-file/
 version: "3.7"
 
+networks:
+  deploy:
+    driver: ${NETWORKS_DRIVER}
+
 services:
-#  nginx:
-#    container_name: nginx
-#    image: nginx:1.17.10-alpine
-#    ports:
-#      - "80:80"
-#    depends_on:
-#      - app
-#    volumes:
-#      - ./nginx/deploy.conf:/etc/nginx/conf.d/deploy.conf
-#    command: nginx -g 'daemon off';
+  golang: # 自定义容器名称
+    container_name: golang
+    build:
+      context: ./golang                  # 指定构建使用的 Dockerfile 文件
+    environment: # 设置环境变量
+      - TZ=${TZ}
+    volumes: # 设置挂载目录
+      - ${CODE_PATH_HOST}:/usr/src/code  # 引用 .env 配置中 CODE_PATH_HOST 变量，将宿主机上代码存放的目录挂载到容器中 /usr/src/code 目录
+    ports: # 设置端口映射
+      - "8000:8000"
+      - "8001:8001"
+      - "8002:8002"
+      - "8003:8003"
+      - "9000:9000"
+      - "9001:9001"
+      - "9002:9002"
+      - "9003:9003"
+    stdin_open: true                     # 打开标准输入，可以接受外部输入
+    tty: true
+    networks:
+      - deploy
+    restart: always                      # 指定容器退出后的重启策略为始终重启
 
   mysql:
-    # 镜像名
-    image: mysql:8.0.21
-    # 容器名(以后的控制都通过这个)
     container_name: mysql
+    build:
+      context: ./mysql
     # 重启策略
     restart: always
     environment:
       # 时区上海
-      TZ: Asia/Shanghai
+      TZ: ${TZ}
       # root 密码
-      MYSQL_ROOT_PASSWORD: 123456
-      # 初始化数据库(后续的初始化sql会在这个库执行)
-      MYSQL_DATABASE: deploy
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       # 初始化用户(不能是root 会报错, 后续需要给新用户赋予权限)
-      MYSQL_USER: deploy
+      MYSQL_USER: ${MYSQL_USERNAME}
       # 用户密码
-      MYSQL_PASSWORD: 123456
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       # 映射端口
-    ports:
-      - "3306:3306"
     volumes:
       # 数据挂载
       - ./mysql/data/:/var/lib/mysql/
@@ -49,20 +60,62 @@ services:
       --collation-server=utf8mb4_general_ci
       --explicit_defaults_for_timestamp=true
       --lower_case_table_names=1
+    ports:
+      - "${MYSQL_PORT}:3306"                          # 设置容器 3306 端口映射指定宿主机端口
     networks:
       - deploy
+      -
+  mysql-manage:
+    build:
+      context: ./mysql-manage
+    environment:
+      - TZ=${TZ}
+      - PMA_ARBITRARY=1
+      - MYSQL_USER=${MYSQL_MANAGE_USERNAME}               # 设置连接的 Mysql 服务用户名称
+      - MYSQL_PASSWORD=${MYSQL_MANAGE_PASSWORD}           # 设置连接的 Mysql 服务用户密码
+      - MYSQL_ROOT_PASSWORD=${MYSQL_MANAGE_ROOT_PASSWORD} # 设置连接的 Mysql 服务 root 用户密码
+      - PMA_HOST=${MYSQL_MANAGE_CONNECT_HOST}             # 设置连接的 Mysql 服务 host，可以是 Mysql 服务容器的名称，也可以是 Mysql 服务容器的 ip 地址
+      - PMA_PORT=${MYSQL_MANAGE_CONNECT_PORT}             # 设置连接的 Mysql 服务端口号
+    ports:
+      - "${MYSQL_MANAGE_PORT}:80"                         # 设置容器80端口映射指定宿主机端口，用于宿主机访问可视化web
+    depends_on: # 依赖容器
+      - mysql                                             # 在 Mysql 服务容器启动后启动
+    networks:
+      - deploy
+    restart: always
 
   redis:
     container_name: redis
-    image: redis:6.0.9-alpine
+    build:
+      context: ./redis
+    environment:
+      - TZ=${TZ}
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT}:6379"                          # 设置容器6379端口映射指定宿主机端口
     networks:
       - deploy
     volumes:
       - ./redis/data:/var/lib/redis
+      -
+  redis-manage:
+    build:
+      context: ./redis-manage
+    environment:
+      - TZ=${TZ}
+      - ADMIN_USER=${REDIS_MANAGE_USERNAME}           # 设置 Redis 可视化管理的用户名称
+      - ADMIN_PASS=${REDIS_MANAGE_PASSWORD}           # 设置 Redis 可视化管理的用户密码
+      - REDIS_1_HOST=${REDIS_MANAGE_CONNECT_HOST}     # 设置连接的 Redis 服务 host，可以是 Redis 服务容器的名称，也可以是 Redis 服务容器的 ip 地址
+      - REDIS_1_PORT=${REDIS_MANAGE_CONNECT_PORT}     # 设置连接的 Redis 服务端口号
+    ports:
+      - "${REDIS_MANAGE_PORT}:80"                     # 设置容器80端口映射指定宿主机端口，用于宿主机访问可视化web
+    depends_on: # 依赖容器
+      - redis                                         # 在 Redis 服务容器启动后启动
+    networks:
+      - deploy
+    restart: always
 
   nsqlookupd:
+    container_name: nsqlookupd
     image: nsqio/nsq
     command: /nsqlookupd --http-address=0.0.0.0:4161
     ports:
@@ -72,6 +125,7 @@ services:
       - deploy
 
   nsqd:
+    container_name: nsqd
     image: nsqio/nsq
     command: /nsqd --lookupd-tcp-address=nsqlookupd:4160
     depends_on:
@@ -83,6 +137,7 @@ services:
       - deploy
 
   nsqadmin:
+    container_name: nsqadmin
     image: nsqio/nsq
     command: /nsqadmin --lookupd-http-address=nsqlookupd:4161
     depends_on:
@@ -94,15 +149,17 @@ services:
 
   jaeger:
     container_name: jaeger
-    image: jaegertracing/all-in-one:1.21
+    build:
+      context: ./jaeger
     environment:
+      - TZ=${TZ}
       - COLLECTOR_ZIPKIN_HTTP_PORT=9411
     ports:
+      - "${JAEGER_PORT}:16686"                        # 设置容器16686端口映射指定宿主机端口，用于宿主机访问可视化web
       - "5775:5775/udp"
       - "6831:6831/udp"
       - "6832:6832/udp"
       - "5778:5778"
-      - "16686:16686"
       - "14268:14268"
       - "14250:14250"
       - "9411:9411"
@@ -111,40 +168,74 @@ services:
 
   prometheus:
     container_name: prometheus
-    image: prom/prometheus
+    build:
+      context: ./prometheus
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT}:9090"                     # 设置容器9090端口映射指定宿主机端口，用于宿主机访问可视化web
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/prometheus.yml:/opt/bitnami/prometheus/conf/prometheus.yml  # 将 prometheus 配置文件挂载到容器里
     networks:
       - deploy
+
+  grafana:
+    container_name: grafana
+    build:
+      context: ./grafana
+    environment:
+      - TZ=${TZ}
+    ports:
+      - "${GRAFANA_PORT}:3000"                        # 设置容器3000端口映射指定宿主机端口，用于宿主机访问可视化web
+    networks:
+      - deploy
+    restart: always
 
   etcd:
-    image: soyking/etcd-goreman:3.2.7
-    environment:
-      - CLIENT_ADDR=etcd
-    ports:
-      - "2379:2379"
-    networks:
-      - deploy
-
-  e3w:
-    image: soyking/e3w:latest
+    container_name: etcd
+    build:
+      context: ./etcd                    # 指定构建使用的 Dockerfile 文件
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    privileged: true
     volumes:
-      - .etcd/conf/config.default.ini:/app/conf/config.default.ini
+      - /etcd/data:/opt/bitnami/etcd/data
+    environment:
+      TZ: ${TZ}
+      ETCD_ADVERTISE_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ALLOW_NONE_AUTHENTICATION: yes
+      ETCD_NAME: node1
+      ETCD_DATA_DIR: /opt/bitnami/etcd/data
     ports:
-      - "23790:8080"
-    depends_on:
-      - etcd
+      - "${ETCD_PORT}:2379"
     networks:
       - deploy
 
+  elk:
+    container_name: elk
+    build:
+      context: ./elk
+    ports:
+      - "5044:5044"
+      - "9200:9200"
+      - "5601:5601"
+    networks:
+      - deploy
 
-
-networks:
-  deploy:
-    driver: "bridge"
-
-volumes:
-  mysql_data:
-  redis_data:
+  dtm:
+    build:
+      context: ./dtm
+    environment:
+      - TZ=${TZ}
+    entrypoint:
+      - "/app/dtm/dtm"
+      - "-c=/app/dtm/configs/config.yaml"
+    volumes:
+      - ./dtm/config.yml:/app/dtm/configs/config.yaml # 将 dtm 配置文件挂载到容器里
+    ports:
+      - "${DTM_HTTP_PORT}:36789"
+      - "${DTM_GRPC_PORT}:36790"
+    networks:
+      - deploy
+    restart: always
