@@ -64,8 +64,9 @@ services:
       - "${MYSQL_PORT}:3306"                          # 设置容器 3306 端口映射指定宿主机端口
     networks:
       - deploy
-      -
+
   mysql-manage:
+    container_name: mysql-manage
     build:
       context: ./mysql-manage
     environment:
@@ -96,8 +97,9 @@ services:
       - deploy
     volumes:
       - ./redis/data:/var/lib/redis
-      -
+
   redis-manage:
+    container_name: redis-manage
     build:
       context: ./redis-manage
     environment:
@@ -201,12 +203,12 @@ services:
     volumes:
       - /etcd/data:/opt/bitnami/etcd/data
     environment:
-      TZ: ${TZ}
-      ETCD_ADVERTISE_CLIENT_URLS: http://0.0.0.0:2379
-      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
-      ALLOW_NONE_AUTHENTICATION: yes
-      ETCD_NAME: node1
-      ETCD_DATA_DIR: /opt/bitnami/etcd/data
+      - TZ=${TZ}
+      - ETCD_ADVERTISE_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_NAME=node1
+      - ETCD_DATA_DIR=/opt/bitnami/etcd/data
     ports:
       - "${ETCD_PORT}:2379"
     networks:
@@ -224,6 +226,7 @@ services:
       - deploy
 
   dtm:
+    container_name: dtm
     build:
       context: ./dtm
     environment:
